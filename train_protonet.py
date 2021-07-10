@@ -8,7 +8,16 @@ from torch.utils.data import DataLoader
 from feat.dataloader.samplers import CategoriesSampler
 from feat.models.protonet import ProtoNet
 from feat.utils import pprint, set_gpu, ensure_path, Averager, Timer, count_acc, compute_confidence_interval
-from tensorboardX import SummaryWriter
+
+import wandb
+
+try:
+    from apex.parallel import DistributedDataParallel as DDP
+    from apex.fp16_utils import *
+    from apex import amp, optimizers
+    from apex.multi_tensor_apply import multi_tensor_applier
+except ImportError:
+    print("AMP is not installed. If --amp is True, code will fail.")    
 
 
 if __name__ == '__main__':
@@ -35,9 +44,12 @@ if __name__ == '__main__':
     parser.add_argument('--rkhs', type=int, default=2048)
     parser.add_argument('--nd', type=int, default=10)
 
+    parser.add_argument('--amp', type=int, default=1)
 
     args = parser.parse_args()
     pprint(vars(args))
+
+    wandb.init(entity="meta-learners", project="AMDIM-SSL-FSL", config=vars(args))
 
     set_gpu(args.gpu)
     save_path1 = '-'.join([args.dataset, args.model_type, 'ProtoNet'])
@@ -48,7 +60,6 @@ if __name__ == '__main__':
     ensure_path(args.save_path)  
 
     if args.dataset == 'MiniImageNet':
-        # Handle MiniImageNet
         from feat.dataloader.mini_imagenet import MiniImageNet as Dataset
     elif args.dataset == 'CUB':
         from feat.dataloader.cub import CUB as Dataset
@@ -76,6 +87,13 @@ if __name__ == '__main__':
         raise ValueError('No Such Encoder')
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)        
     
+
+    # amp
+
+    if args.amp:
+        print("-----------Using mixed precision-----------") 
+        model, optimizer = amp.initialize(model, optimizer)
+
     # load pre-trained model (no FC weights)
 
     model_dict = model.state_dict()
@@ -105,6 +123,7 @@ if __name__ == '__main__':
     
     def save_model(name):
         torch.save(dict(params=model.state_dict()), osp.join(args.save_path, name + '.pth'))
+        wandb.save(osp.join(args.save_path, name + '.pth'))
     
     trlog = {}
     trlog['args'] = vars(args)
@@ -117,7 +136,6 @@ if __name__ == '__main__':
 
     timer = Timer()
     global_count = 0
-    writer = SummaryWriter(logdir=args.save_path)
     
     for epoch in range(1, args.max_epoch + 1):
         lr_scheduler.step()
@@ -142,8 +160,10 @@ if __name__ == '__main__':
             logits = model(data_shot, data_query)
             loss = F.cross_entropy(logits, label)
             acc = count_acc(logits, label)
-            writer.add_scalar('data/loss', float(loss), global_count)
-            writer.add_scalar('data/acc', float(acc), global_count)
+
+            wandb.log({"train/loss": float(loss)}, step=global_count)
+            wandb.log({"train/acc": float(acc)}, step=global_count)
+
             print('epoch {}, train {}/{}, loss={:.4f} acc={:.4f}'
                   .format(epoch, i, len(train_loader), loss.item(), acc))
 
@@ -151,7 +171,13 @@ if __name__ == '__main__':
             ta.add(acc)
 
             optimizer.zero_grad()
-            loss.backward()
+
+            if args.amp:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+            
             optimizer.step()
 
         tl = tl.item()
@@ -186,8 +212,10 @@ if __name__ == '__main__':
 
         vl = vl.item()
         va = va.item()
-        writer.add_scalar('data/val_loss', float(vl), epoch)
-        writer.add_scalar('data/val_acc', float(va), epoch)        
+
+        wandb.log({"val/acc": float(va), "epoch": epoch})
+        wandb.log({"val/loss": float(vl), "epoch": epoch})
+
         print('epoch {}, val, loss={:.4f} acc={:.4f}'.format(epoch, vl, va))
 
         if va > trlog['max_acc']:
@@ -205,7 +233,6 @@ if __name__ == '__main__':
         save_model('epoch-last')
 
         print('ETA:{}/{}'.format(timer.measure(), timer.measure(epoch / args.max_epoch)))
-    writer.close()
 
     # Test Phase
     trlog = torch.load(osp.join(args.save_path, 'trlog'))
@@ -242,3 +269,8 @@ if __name__ == '__main__':
     m, pm = compute_confidence_interval(test_acc_record)
     print('Val Best Acc {:.4f}, Test Acc {:.4f}'.format(trlog['max_acc'], ave_acc.item()))
     print('Test Acc {:.4f} + {:.4f}'.format(m, pm))
+
+    wandb.log({"test/acc": float(m)})
+    wandb.log({"test/acc_std": float(pm)})
+
+    wandb.finish()

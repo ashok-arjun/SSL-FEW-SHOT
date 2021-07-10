@@ -7,7 +7,7 @@ import numpy as np
 
 THIS_PATH = osp.dirname(__file__)
 ROOT_PATH = osp.abspath(osp.join(THIS_PATH, '..', '..'))
-IMAGE_PATH = osp.join(ROOT_PATH, 'data/miniimagenet/images')
+IMAGE_PATH = osp.join(ROOT_PATH, '../filelists/miniImagenet/images')
 SPLIT_PATH = osp.join(ROOT_PATH, 'data/miniimagenet/split')
 
 class MiniImageNet(Dataset):
@@ -25,7 +25,7 @@ class MiniImageNet(Dataset):
 
         for l in lines:
             name, wnid = l.split(',')
-            path = osp.join(IMAGE_PATH, name)
+            path = osp.join(IMAGE_PATH, wnid, name)
             if wnid not in self.wnids:
                 self.wnids.append(wnid)
                 lb += 1
