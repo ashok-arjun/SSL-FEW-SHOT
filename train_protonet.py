@@ -30,7 +30,7 @@ if __name__ == '__main__':
     parser.add_argument('--step_size', type=int, default=10)
     parser.add_argument('--gamma', type=float, default=0.2)
     parser.add_argument('--temperature', type=float, default=1)
-    parser.add_argument('--model_type', type=str, default='ConvNet', choices=['ConvNet', 'ResNet', 'AmdimNet'])
+    parser.add_argument('--model_type', type=str, default='AmdimNet', choices=['ConvNet', 'ResNet', 'AmdimNet'])
     parser.add_argument('--dataset', type=str, default='MiniImageNet', choices=['MiniImageNet', 'CUB', 'TieredImageNet'])
     # MiniImageNet, ConvNet, './saves/initialization/miniimagenet/con-pre.pth'
     # MiniImageNet, ResNet, './saves/initialization/miniimagenet/res-pre.pth'
@@ -70,11 +70,11 @@ if __name__ == '__main__':
 
     trainset = Dataset('train', args)
     train_sampler = CategoriesSampler(trainset.label, 100, args.way, args.shot + args.query)
-    train_loader = DataLoader(dataset=trainset, batch_sampler=train_sampler, num_workers=8, pin_memory=True)
+    train_loader = DataLoader(dataset=trainset, batch_sampler=train_sampler, num_workers=16, pin_memory=True)
 
     valset = Dataset('val', args)
     val_sampler = CategoriesSampler(valset.label, 500, args.way, args.shot + args.query)
-    val_loader = DataLoader(dataset=valset, batch_sampler=val_sampler, num_workers=8, pin_memory=True)
+    val_loader = DataLoader(dataset=valset, batch_sampler=val_sampler, num_workers=16, pin_memory=True)
     
     model = ProtoNet(args)
     if args.model_type == 'ConvNet':
@@ -238,7 +238,7 @@ if __name__ == '__main__':
     trlog = torch.load(osp.join(args.save_path, 'trlog'))
     test_set = Dataset('test', args)
     sampler = CategoriesSampler(test_set.label, 10000, args.way, args.shot + args.query)
-    loader = DataLoader(test_set, batch_sampler=sampler, num_workers=8, pin_memory=True)
+    loader = DataLoader(test_set, batch_sampler=sampler, num_workers=16, pin_memory=True)
     test_acc_record = np.zeros((10000,))
 
     model.load_state_dict(torch.load(osp.join(args.save_path, 'max_acc' + '.pth'))['params'])
